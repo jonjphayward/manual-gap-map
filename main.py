@@ -165,11 +165,13 @@ def get_gaps(framerate, framerate_choice, output_text, output_csv, file):
 
 
 
-input_folder = os.getcwd() + "\\input\\"
 gap_count = 0
 document = Document()
 p = document.add_paragraph("")
+input_folder = os.getcwd() + "\\input\\"
 
+if not os.path.exists(input_folder):
+   os.makedirs(input_folder)
 
 if len(os.listdir(input_folder)) == 0:
 	print("Please put a file into the input folder")
