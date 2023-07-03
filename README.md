@@ -7,14 +7,10 @@ I have converted the python script to an exe file with everything you need to ge
 1) Download the git repository
 2) Extract the gap-map.zip
 3) Once extracted you should see a folder system like this:
-
-...bash
-└── gap-map/
-    └── package/
-        ├── input/
-        │   └── put your speechmatic json files here!
-        └── main.exe
-...
+*gap-map/
+**package/
+***input/
+***main.exe
 4) Copy your speechmatic json files into the input folder and then double click the main.exe file.
 
 Instructions will appear in the terminal
