@@ -7,7 +7,7 @@ I have converted the python script to an exe file with everything you need to ge
 1) Download the git repository
 2) Extract the gap-map.zip
 3) Once extracted you should see a folder system like this:
-
+.
 └── gap-map/
     └── package/
         ├── input/
