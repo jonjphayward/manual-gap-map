@@ -1,342 +1,235 @@
 import datetime
-import docx
 import json
 import math
 import os
 from docx import Document
 import timecode as tc
 
-
 def is_float(value):
-  try:
-    float(value)
-    return True
-  except:
-    return False
-
+    """Check if a value can be converted to float."""
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
 
 def get_smpte_frames(time, framerate, smpte_timecode):
-	seconds = int(math.floor(time))
-	hours  = seconds // 3600
-	minutes = (seconds % 3600) // 60
-	seconds = seconds % 60
-	frame_float = float(time) - int(math.floor(time))
-	frames = int(math.floor(frame_float * float(framerate)))
-	tc1 = tc.Timecode(framerate, str(hours)+":"+str(minutes)+":"+str(seconds)+":"+str(frames))
-	if smpte_timecode != None:
-		tc2 = tc.Timecode(framerate, str(smpte_timecode[0])+":"+str(smpte_timecode[1])+":"+str(smpte_timecode[2])+":"+str(smpte_timecode[3]))
-		tc3 = tc1 + tc2
-		print(tc3)
-		#[timecode_hours, timecode_mins, timecode_secs, timecode_frames]
-		#seconds = seconds + int(smpte_timecode[2]) 
-		#hours = hours + int(smpte_timecode[0])
-		#minutes = minutes + int(smpte_timecode[1])
-		return str(tc3)
-	else:
-		return str(hours).zfill(2)+":"+ str(minutes).zfill(2)+":"+str(seconds).zfill(2)+":"+str(frames).zfill(2)
+    # Check if the framerate is one of the drop frame rates
+    drop_frame = framerate in [23.976, 23.98, 29.97]
 
-	#return str(hours).zfill(2)+":"+ str(minutes).zfill(2)+":"+str(seconds).zfill(2)+":"+str(frames).zfill(2)
+    if drop_frame:
+        # Adjust framerate for drop frame calculation
+        if framerate in [23.976, 23.98]:
+            adjusted_fps = 24 * (1000 / 1001)
+        elif framerate == 29.97:
+            adjusted_fps = 30 * (1000 / 1001)
+
+        # Calculate total frames based on adjusted fps
+        total_frames = int(round(time * adjusted_fps))
+        frames = total_frames % round(adjusted_fps)
+        total_seconds = total_frames // round(adjusted_fps)
+        seconds = total_seconds % 60
+        total_minutes = total_seconds // 60
+        minutes = total_minutes % 60
+        hours = total_minutes // 60
+    else:
+        # Calculate time for non-drop frame rates
+        seconds = int(math.floor(time))
+        hours  = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        seconds = seconds % 60
+        frame_float = float(time) - int(math.floor(time))
+        frames = int(math.floor(frame_float * float(framerate)))
+
+    tc1 = tc.Timecode(framerate, f"{hours:02}:{minutes:02}:{seconds:02}:{frames:02}")
+
+    if smpte_timecode is not None:
+        tc2 = tc.Timecode(framerate, f"{smpte_timecode[0]:02}:{smpte_timecode[1]:02}:{smpte_timecode[2]:02}:{smpte_timecode[3]:02}")
+        tc3 = tc1 + tc2
+        return str(tc3)
+    else:
+        return f"{hours:02}:{minutes:02}:{seconds:02}:{frames:02}"
 
 def get_smpte_milli(time, smpte_timecode):
-	seconds = int(math.floor(time))
-	hours  = seconds // 3600
-	minutes = (seconds % 3600) // 60
-	seconds = seconds % 60
-	frame_float = float(time) - int(math.floor(time))
-	if smpte_timecode != None:
-		seconds_millis = float(seconds) + float(frame_float) + float(smpte_timecode[2]) + float(smpte_timecode[3])
-		seconds_millis_ints = str(seconds_millis).split(".")[0]
-		seconds_millis_float = str(seconds_millis).split(".")[1]
-		rounded_minute = int(seconds_millis_ints) // 60
-		seconds = int(seconds_millis_ints) % 60 #modulo 60 to get remainder
-		minutes = int(minutes) + int(rounded_minute) + int(smpte_timecode[1])
-		rounded_hour = int(minutes) // 60
-		minutes = int(minutes) % 60
-		hours = int(hours) + int(smpte_timecode[0]) + int(rounded_hour)
-		sm_comma = str(seconds).zfill(2) + "," + seconds_millis_float.zfill(3)[:3]
-	
-		return str(hours).zfill(2)+":"+ str(minutes).zfill(2)+":"+str(sm_comma)
+    seconds = int(math.floor(time))
+    hours  = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    seconds = seconds % 60
+    frame_float = float(time) - int(math.floor(time))
+
+    if smpte_timecode is not None:
+        seconds_millis = float(seconds) + frame_float + float(smpte_timecode[2]) + float(smpte_timecode[3])
+        seconds_millis_ints = str(seconds_millis).split(".")[0]
+        seconds_millis_float = str(seconds_millis).split(".")[1]
+        rounded_minute = int(seconds_millis_ints) // 60
+        seconds = int(seconds_millis_ints) % 60
+        minutes = minutes + rounded_minute + int(smpte_timecode[1])
+        rounded_hour = minutes // 60
+        minutes = minutes % 60
+        hours = hours + int(smpte_timecode[0]) + rounded_hour
+        sm_comma = str(seconds).zfill(2) + "," + seconds_millis_float.zfill(3)[:3]
+    else:
+        seconds_millis = float(seconds) + frame_float
+        seconds_millis_ints = str(seconds_millis).split(".")[0]
+        seconds_millis_float = str(seconds_millis).split(".")[1]
+        sm_comma = seconds_millis_ints.zfill(2) + "," + seconds_millis_float.zfill(3)[:3]
+
+    return str(hours).zfill(2) + ":" + str(minutes).zfill(2) + ":" + sm_comma
 
 
+def get_gaps(framerate, is_framerate_choice, output_text, output_csv, file_path, smpte_timecode, data):
+    """Process gaps in speech based on the given parameters."""
+    gap_count = 0
+    document = Document()
+    paragraph = document.add_paragraph("")
 
+    g_thresh = input("Please type a gap threshold: ")
+    if not g_thresh.isdigit():
+        raise ValueError("Threshold must be a number.")
 
-	else:
-		seconds_millis = float(seconds) + float(frame_float)
-		#sm_comma = str(seconds_millis).replace(".", ",")
-		seconds_millis_ints = str(seconds_millis).split(".")[0]
-		seconds_millis_float = str(seconds_millis).split(".")[1]
+    gap_duration = float(g_thresh)
+    time = 0.0
+    previous_words = []
 
-		sm_comma = seconds_millis_ints.zfill(2) + "," + seconds_millis_float.zfill(3)[:3]
+    # File operations for output
+    filename, file_extension = os.path.splitext(file_path)
+    file_handlers = open_output_files(output_text, output_csv, filename)
 
-		return str(hours).zfill(2)+":"+ str(minutes).zfill(2)+":"+str(sm_comma)
+    for key, value in enumerate(data["results"]):
+        word = value["alternatives"][0]["content"]
+        if len(previous_words) == 5:
+            del previous_words[0]
+        previous_words.append(word)
 
+        gap = float(value["start_time"]) - time
+        if gap > gap_duration:
+            gap_count += 1
+            start_time = datetime.timedelta(seconds=float(time))
+            end_time = datetime.timedelta(seconds=float(value["start_time"]))
 
-def get_gaps(framerate, framerate_choice, output_text, output_csv, file):
-	global gap_count
-	g_thresh = input("Please type a gap threshold: ")
-	try:
-		if g_thresh.isdigit():
-			threshold_choice = True
-			gap_duration = float(g_thresh)
-			time = 0.0
-			word = ""
-			previous_words = []
+            paragraph.add_run(f"\n\n*****Audio gap found*****\nPrevious words: {' '.join(previous_words)}\n")
+            if is_framerate_choice:
+                paragraph.add_run(f"Start TC: {get_smpte_frames(time, framerate, smpte_timecode)}\n")
+                paragraph.add_run(f"End TC: {get_smpte_frames(float(value['start_time']), framerate, smpte_timecode)}\n")
+            else:
+                paragraph.add_run(f"Start: {get_smpte_milli(time, smpte_timecode)}\n")
+                paragraph.add_run(f"End: {get_smpte_milli(float(value['start_time']), smpte_timecode)}\n")
+            paragraph.add_run(f"Duration: {gap} seconds")
 
-			if output_text:
-				filename, file_extension = os.path.splitext(file)
-				f = open(filename+".srt","w+", encoding="utf8")
-			
-			if output_csv:
-				filename, file_extension = os.path.splitext(file)
-				c = open(filename+".csv","w+", encoding="utf8")
-				c.write("Input Timecode,Output Timecode,Dialogue,Max time in ms\n")
-			
-			count = 0
+            if output_text:
+                text_file = file_handlers.get("text_file")
+                text_file.write(f"{gap_count}\n")
+                if is_framerate_choice:
+                    text_file.write(f"{get_smpte_frames(time, framerate, smpte_timecode)} --> {get_smpte_frames(float(value['start_time']), framerate, smpte_timecode)}\n")
+                else:
+                    text_file.write(f"{get_smpte_milli(time, smpte_timecode)} --> {get_smpte_milli(float(value['start_time']), smpte_timecode)}\n")
+                text_file.write(f"{' '.join(previous_words)}\n\n")
 
-			for key, value in enumerate(data["results"]):
-				word = value["alternatives"][0]["content"]
-				if len(previous_words) == 5:
-					del previous_words[0]
-					previous_words.append(word)
-				else:
-					previous_words.append(word)
+            if output_csv:
+                csv_file = file_handlers.get("csv_file")
+                if is_framerate_choice:
+                    csv_file.write(f'"{get_smpte_frames(time, framerate, smpte_timecode)}","{get_smpte_frames(float(value["start_time"]), framerate, smpte_timecode)}","{" ".join(previous_words)}",{int(gap*1000)}\n')
+                else:
+                    csv_file.write(f'"{get_smpte_milli(time, smpte_timecode)}","{get_smpte_milli(float(value["start_time"]), smpte_timecode)}","{" ".join(previous_words)}",{int(gap*1000)}\n')
 
-				gap = float(value["start_time"]) - time
-				gap_decimal = str(gap).split(".")[1]
-				gap_int = str(gap).split(".")[0]
-				gap = float(str(gap_int) + "." + str(gap_decimal[:3]))
-				if gap > gap_duration:
-					gap_count += 1
-					#start_time = round(time/60, 2)
-					start_time = datetime.timedelta(seconds=float(time))
-					end_time = datetime.timedelta(seconds=float(value["start_time"]))
+        time = float(value["start_time"])
 
-					print("\n*****Audio gap found*****")
-					if count == 0:
-						p.add_run("*****Audio gap found*****")
-					else:
-						p.add_run("\n\n*****Audio gap found*****")
-					print("Previous words: " + ' '.join(previous_words))
-					p.add_run("\nPrevious words: " + ' '.join(previous_words))
-					
-					if framerate_choice == False:
-						print("Start: "+str(get_smpte_milli(time, smpte_timecode)))
-						p.add_run("\nStart: "+str(get_smpte_milli(time, smpte_timecode)))
-						print("End: "+str(get_smpte_milli(float(value["start_time"]), smpte_timecode)))
-						p.add_run("\nEnd: "+str(get_smpte_milli(float(value["start_time"]), smpte_timecode)))
-					else:
-						print("Start TC: "+get_smpte_frames(time, framerate, smpte_timecode))
-						p.add_run("\nStart TC: "+get_smpte_frames(time, framerate, smpte_timecode))
-						print("End TC: "+get_smpte_frames(float(value["start_time"]), framerate, smpte_timecode))
-						p.add_run("\nEnd TC: "+get_smpte_frames(float(value["start_time"]), framerate, smpte_timecode))
+    close_output_files(file_handlers)
+    return gap_count, document
 
-					print("Duration: "+str(gap) + " seconds")
-					p.add_run("\nDuration: "+str(gap) + " seconds")
+def open_output_files(output_text, output_csv, filename):
+    """Open file handlers for output files."""
+    handlers = {}
+    if output_text:
+        handlers["text_file"] = open(filename + ".srt", "w+", encoding="utf8")
+    if output_csv:
+        handlers["csv_file"] = open(filename + ".csv", "w+", encoding="utf8")
+        handlers["csv_file"].write("Input Timecode,Output Timecode,Dialogue,Max time in ms\n")
+    return handlers
 
+def close_output_files(handlers):
+    """Close opened file handlers."""
+    for handler in handlers.values():
+        handler.close()
 
-					if output_text:
-						f.write(str(gap_count) +"\n")
-						if framerate_choice == False: 
-							f.write(str(get_smpte_milli(time, smpte_timecode))+" --> "+str(get_smpte_milli(float(value["start_time"]), smpte_timecode))+"\n")
-						else:
-							f.write(str(get_smpte_frames(time, framerate, smpte_timecode))+" --> "+str(get_smpte_frames(float(value["start_time"]), framerate, smpte_timecode))+"\n")
-						f.write(' '.join(previous_words)+"\n\n")
-					if output_csv:
-						#c.write(str(gap_count) +"\n")
-						if framerate_choice == False: 
-							c.write('"' + str(get_smpte_milli(time, smpte_timecode)) + '","' + 
-									str(get_smpte_milli(float(value["start_time"]), smpte_timecode)) + '",' +
-									' '.join(previous_words) + ',' + str(int(gap*1000)) + "\n")
-						else:
-							c.write('"' + str(get_smpte_frames(time, framerate, smpte_timecode)) + '","' + 
-									str(get_smpte_frames(float(value["start_time"]), framerate, smpte_timecode)) + '",' +
-									' '.join(previous_words) + ',' + str(int(gap*1000)) + "\n")
-						
+def get_user_preferences():
+    """Get user preferences for timecode and framerate."""
+    smpte_timecode = None
+    framerate_choice = input("Do you want your results in SMPTE timecode? (Y / N) ").lower() in ["y", "yes"]
+    framerate = 0
 
-				time = float(value["start_time"])
-				count += 1
+    if framerate_choice:
+        smpte_timecode = get_start_timecode()
+        framerate = get_framerate()
+    else:
+        # If SMPTE timecode is not chosen, then default to hours:minutes:seconds.milliseconds format
+        smpte_timecode = [0, 0, 0, 0]  # Default start timecode
 
-			if output_text:
-				f.close()
+    return smpte_timecode, framerate, framerate_choice
 
-		
-	except Exception as e:
-		print(e)
+def get_start_timecode():
+    """Get start timecode from the user."""
+    get_start_timecode = input("Do you know the start timecode? (Y / N) ").lower() in ["y", "yes"]
+    if get_start_timecode:
+        timecode_hours = get_validated_input("Please enter the start timecode's hours value: ", int)
+        timecode_mins = get_validated_input("Please enter the start timecode's minutes value: ", int)
+        timecode_secs = get_validated_input("Please enter the start timecode's seconds value: ", int)
+        timecode_frames = get_validated_input("Please enter the start timecode's frames value: ", int)
 
+        return [timecode_hours, timecode_mins, timecode_secs, timecode_frames]
+    return None
 
+def get_framerate():
+    """Get framerate from the user."""
+    while True:
+        display_framerate = input("Please type the framerate: ")
+        if is_float(display_framerate):
+            return float(display_framerate)
+        else:
+            print("Invalid input. Please type a numeric framerate.")
 
-gap_count = 0
-document = Document()
-p = document.add_paragraph("")
-input_folder = os.getcwd() + "\\input\\"
+def get_output_preferences():
+    """Get user preferences for output file formats."""
+    output_text = input("Do you want to output an srt file? (Y / N) ").lower() in ["y", "yes"]
+    output_docx = input("Do you want to output a docx file? (Y / N) ").lower() in ["y", "yes"]
+    output_csv = input("Do you want to output a csv file? (Y / N) ").lower() in ["y", "yes"]
 
-if not os.path.exists(input_folder):
-   os.makedirs(input_folder)
+    return output_text, output_docx, output_csv
 
-if len(os.listdir(input_folder)) == 0:
-	print("Please put a file into the input folder")
+def get_validated_input(prompt, input_type):
+    """Get validated input of a specific type from the user."""
+    while True:
+        user_input = input(prompt)
+        try:
+            return input_type(user_input)
+        except ValueError:
+            print(f"Invalid input. Please enter a valid {input_type.__name__}.")
 
-for file in os.listdir(input_folder):
-	with open(input_folder + file, encoding="utf8") as f:
-		data = json.load(f)
+def main():
+    """Main function to run the script."""
+    input_folder = os.path.join(os.getcwd(), "input")
+    if not os.path.exists(input_folder):
+        os.makedirs(input_folder)
+    if not os.path.exists(input_folder) or not os.listdir(input_folder):
+        print("Please put a file into the input folder")
+        return
 
-	threshold_choice = False
-	output_text = False
-	output_csv = False
-	framerate_choice = False
-	output_docx = False
+    for file in os.listdir(input_folder):
+        file_path = os.path.join(input_folder, file)
+        with open(file_path, encoding="utf8") as f:
+            data = json.load(f)
 
-	#commands
-	while threshold_choice is False:
-		framerate = input("Do you want your results in SMPTE timecode? (Y / N) ")
-		if framerate.lower() == "y" or framerate.lower() == "yes":
-			framerate_choice = True
+        smpte_timecode, framerate, is_framerate_choice = get_user_preferences()
+        output_text, output_docx, output_csv = get_output_preferences()
 
-			get_start_timecode = input("Do you know the start timecode? ")
-			if get_start_timecode.lower() == "y" or get_start_timecode.lower() == "yes":
-				get_start_timecode = True
-			
+        gap_count, document = get_gaps(framerate, is_framerate_choice, output_text, output_csv, file_path, smpte_timecode, data)
 
-				timecode_hours = input("Please enter the start timecodes hours value: ")
-				if timecode_hours.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_hours))
-					print("closing...")
-					exit()
-				timecode_mins = input("Please enter the start timecodes minutes value: ")
-				if timecode_mins.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_mins))
-					print("closing...")
-					exit()
-				timecode_secs = input("Please enter the start timecodes seconds value: ")
-				if timecode_secs.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_secs))
-					print("closing...")
-					exit()
-				timecode_frames = input("Please enter the start timecodes frames value: ")
-				if timecode_frames.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_frames))
-					print("closing...")
-					exit()
+        print(f"\nTotal number of gaps in the JSON: {gap_count}")
+        if output_docx:
+            filename = os.path.splitext(file_path)[0]
+            document.save(filename + '.docx')
 
-				smpte_timecode = [timecode_hours, timecode_mins, timecode_secs, timecode_frames]
+    input("Press Enter to exit...")
 
-			else:
-				smpte_timecode = None
-				get_start_timecode = False
-
-			display_framerate = input("Please type the framerate: ")
-
-			if is_float(display_framerate):
-				display_framerate = float(display_framerate)
-			else:
-				display_framerate = int(display_framerate)
-
-			if type(display_framerate) is float or type(display_framerate) is int:
-				output_text_choice = input("Do you want to output an srt file? (Y / N) ")
-				if output_text_choice.lower() == "y" or output_text_choice.lower() == "yes":
-					output_text = True
-				else:
-					output_text = False
-			else:
-				print("I don't understand " + str(input) + " please type a number and try again")
-			
-			output_docx_choice = input("Do you want to output a docx file? (Y / N) ")
-			if output_docx_choice.lower() == "y" or output_docx_choice.lower() == "yes":
-				output_docx = True
-			else:
-				output_docx = False
-
-			output_csv_choice = input("Do you want to output a csv file? (Y / N) ")
-			if output_csv_choice.lower() == "y" or output_csv_choice.lower() == "yes":
-				output_csv = True
-			else:
-				output_csv = False
-				
-		else:
-			framerate_choice = False
-			display_framerate = 0
-
-			get_start_timecode = input("Do you know the start timecode? ")
-			if get_start_timecode.lower() == "y" or get_start_timecode.lower() == "yes":
-				get_start_timecode = True
-			
-
-				timecode_hours = input("Please enter the start timecodes hours value: ")
-				if timecode_hours.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_hours))
-					print("closing...")
-					exit()
-				timecode_mins = input("Please enter the start timecodes minutes value: ")
-				if timecode_mins.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_mins))
-					print("closing...")
-					exit()
-				timecode_secs = input("Please enter the start timecodes minutes value: ")
-				if timecode_secs.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_secs))
-					print("closing...")
-					exit()
-				timecode_frames = input("Please enter the start timecodes frames value: ")
-				if timecode_frames.isdigit():
-					pass
-				else:
-					print("I don't understand " + str(timecode_frames))
-					print("closing...")
-					exit()
-
-				smpte_timecode = [timecode_hours, timecode_mins, timecode_secs, timecode_frames]
-
-			else:
-				smpte_timecode = None
-				get_start_timecode = False
-
-			output_text_choice = input("Do you want to output an srt file? (Y / N) ")
-			if output_text_choice.lower() == "y" or output_text_choice.lower() == "yes":
-				output_text = True
-			else:
-				output_text = False
-
-			output_docx_choice = input("Do you want to output a docx file? (Y / N) ")
-			if output_docx_choice.lower() == "y" or output_docx_choice.lower() == "yes":
-				output_docx = True
-			else:
-				output_docx = False
-
-			output_csv_choice = input("Do you want to output a csv file? (Y / N) ")
-			if output_csv_choice.lower() == "y" or output_csv_choice.lower() == "yes":
-				output_csv = True
-			else:
-				output_csv = False
-
-		threshold_choice = True
-		get_gaps(display_framerate, framerate_choice, output_text, output_csv, file)
-
-	print("\nTotal number of gaps in the JSON: " + str(gap_count))
-	p.add_run("\nTotal number of gaps in the JSON: " + str(gap_count))
-
-	if output_docx:
-		filename, file_extension = os.path.splitext(file)
-		document.save(filename + '.docx')
-	else:
-		pass
-
-	#print(str(key["name"]))
-		#for words in d:
-			#for a in words:
-				#print(a)
-
-input()
+if __name__ == "__main__":
+    main()
