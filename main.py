@@ -14,32 +14,24 @@ def is_float(value):
         return False
 
 def get_smpte_frames(time, framerate, smpte_timecode):
-    # Check if the framerate is one of the drop frame rates
-    drop_frame = framerate in [23.976, 23.98, 29.97]
-
-    if drop_frame:
-        # Adjust framerate for drop frame calculation
-        if framerate in [23.976, 23.98]:
-            adjusted_fps = 24 * (1000 / 1001)
-        elif framerate == 29.97:
-            adjusted_fps = 30 * (1000 / 1001)
-
-        # Calculate total frames based on adjusted fps
-        total_frames = int(round(time * adjusted_fps))
-        frames = total_frames % round(adjusted_fps)
-        total_seconds = total_frames // round(adjusted_fps)
-        seconds = total_seconds % 60
-        total_minutes = total_seconds // 60
-        minutes = total_minutes % 60
-        hours = total_minutes // 60
+    # Adjust framerate for drop frame timecodes
+    if framerate in [23.976, 23.98]:
+        adjusted_fps = 24 * (1000 / 1001)
+    elif framerate == 29.97:
+        adjusted_fps = 30 * (1000 / 1001)
     else:
-        # Calculate time for non-drop frame rates
-        seconds = int(math.floor(time))
-        hours  = seconds // 3600
-        minutes = (seconds % 3600) // 60
-        seconds = seconds % 60
-        frame_float = float(time) - int(math.floor(time))
-        frames = int(math.floor(frame_float * float(framerate)))
+        adjusted_fps = framerate
+
+    # Calculate total frames
+    total_frames = int(round(time * adjusted_fps))
+
+    # Calculate frames, seconds, minutes, and hours
+    frames = total_frames % int(round(adjusted_fps))
+    total_seconds = total_frames // int(round(adjusted_fps))
+    seconds = total_seconds % 60
+    total_minutes = total_seconds // 60
+    minutes = total_minutes % 60
+    hours = total_minutes // 60
 
     tc1 = tc.Timecode(framerate, f"{hours:02}:{minutes:02}:{seconds:02}:{frames:02}")
 
@@ -137,9 +129,14 @@ def get_gaps(framerate, is_framerate_choice, output_text, output_csv, file_path,
     close_output_files(file_handlers)
     return gap_count, document
 
-def open_output_files(output_text, output_csv, filename):
+def open_output_files(output_text, output_csv, file_path):
     """Open file handlers for output files."""
     handlers = {}
+
+    # Extracting the base name of the file for the output file name
+    base_filename = os.path.basename(file_path)
+    filename, file_extension = os.path.splitext(base_filename)
+
     if output_text:
         handlers["text_file"] = open(filename + ".srt", "w+", encoding="utf8")
     if output_csv:
@@ -210,7 +207,7 @@ def main():
     input_folder = os.path.join(os.getcwd(), "input")
     if not os.path.exists(input_folder):
         os.makedirs(input_folder)
-    if not os.path.exists(input_folder) or not os.listdir(input_folder):
+    if not os.listdir(input_folder):
         print("Please put a file into the input folder")
         return
 
@@ -226,10 +223,10 @@ def main():
 
         print(f"\nTotal number of gaps in the JSON: {gap_count}")
         if output_docx:
-            filename = os.path.splitext(file_path)[0]
+            base_filename = os.path.basename(file_path)
+            filename = os.path.splitext(base_filename)[0]
             document.save(filename + '.docx')
-
-    input("Press Enter to exit...")
 
 if __name__ == "__main__":
     main()
+    input("Press Enter to exit...")
