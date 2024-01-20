@@ -19,6 +19,8 @@ def get_smpte_frames(time, framerate, smpte_timecode):
         adjusted_fps = 24 * (1000 / 1001)
     elif framerate == 29.97:
         adjusted_fps = 30 * (1000 / 1001)
+    elif framerate == 59.94:
+        adjusted_fps = 60 * (1000 / 1001)
     else:
         adjusted_fps = framerate
 
@@ -44,30 +46,23 @@ def get_smpte_frames(time, framerate, smpte_timecode):
 
 def get_smpte_milli(time, smpte_timecode):
     seconds = int(math.floor(time))
-    hours  = seconds // 3600
+    hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     seconds = seconds % 60
-    frame_float = float(time) - int(math.floor(time))
+    milliseconds = int(round((time - math.floor(time)) * 1000))
 
     if smpte_timecode is not None:
-        seconds_millis = float(seconds) + frame_float + float(smpte_timecode[2]) + float(smpte_timecode[3])
-        seconds_millis_ints = str(seconds_millis).split(".")[0]
-        seconds_millis_float = str(seconds_millis).split(".")[1]
-        rounded_minute = int(seconds_millis_ints) // 60
-        seconds = int(seconds_millis_ints) % 60
-        minutes = minutes + rounded_minute + int(smpte_timecode[1])
-        rounded_hour = minutes // 60
+        milliseconds += int(smpte_timecode[3])
+        extra_seconds = milliseconds // 1000
+        milliseconds = milliseconds % 1000
+        seconds += extra_seconds + int(smpte_timecode[2])
+        extra_minutes = seconds // 60
+        seconds = seconds % 60
+        minutes += extra_minutes + int(smpte_timecode[1])
+        hours += (minutes // 60) + int(smpte_timecode[0])
         minutes = minutes % 60
-        hours = hours + int(smpte_timecode[0]) + rounded_hour
-        sm_comma = str(seconds).zfill(2) + "," + seconds_millis_float.zfill(3)[:3]
-    else:
-        seconds_millis = float(seconds) + frame_float
-        seconds_millis_ints = str(seconds_millis).split(".")[0]
-        seconds_millis_float = str(seconds_millis).split(".")[1]
-        sm_comma = seconds_millis_ints.zfill(2) + "," + seconds_millis_float.zfill(3)[:3]
 
-    return str(hours).zfill(2) + ":" + str(minutes).zfill(2) + ":" + sm_comma
-
+    return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
 
 def get_gaps(framerate, is_framerate_choice, output_text, output_csv, file_path, smpte_timecode, data):
     """Process gaps in speech based on the given parameters."""
@@ -156,22 +151,26 @@ def get_user_preferences():
     framerate = 0
 
     if framerate_choice:
-        smpte_timecode = get_start_timecode()
+        smpte_timecode = get_start_timecode(framerate_choice)
         framerate = get_framerate()
     else:
-        # If SMPTE timecode is not chosen, then default to hours:minutes:seconds.milliseconds format
-        smpte_timecode = [0, 0, 0, 0]  # Default start timecode
+        # If SMPTE timecode is not chosen, then default to hours:minutes:seconds,milliseconds format
+        smpte_timecode = get_start_timecode(framerate_choice)
 
     return smpte_timecode, framerate, framerate_choice
 
-def get_start_timecode():
+def get_start_timecode(framerate_choice):
     """Get start timecode from the user."""
     get_start_timecode = input("Do you know the start timecode? (Y / N) ").lower() in ["y", "yes"]
     if get_start_timecode:
         timecode_hours = get_validated_input("Please enter the start timecode's hours value: ", int)
         timecode_mins = get_validated_input("Please enter the start timecode's minutes value: ", int)
         timecode_secs = get_validated_input("Please enter the start timecode's seconds value: ", int)
-        timecode_frames = get_validated_input("Please enter the start timecode's frames value: ", int)
+        if framerate_choice:
+            timecode_frames = get_validated_input("Please enter the start timecode's frames value: ", int)
+        else:
+            timecode_frames = get_validated_input("Please enter the start timecode's milliseconds value: ", int)
+            
 
         return [timecode_hours, timecode_mins, timecode_secs, timecode_frames]
     return None
